@@ -1,0 +1,23 @@
+[Interface]
+Address = {{ tunnel_ip }}/24
+PrivateKey = {{ privkey }}
+{% if inventory_hostname in groups['hub'] %}
+ListenPort = 51820
+{% for h in groups['sedes'] %}
+
+[Peer]
+# {{ h }}
+PublicKey = {{ hostvars[h].pubkey }}
+AllowedIPs = {{ hostvars[h].tunnel_ip }}/32{% if hostvars[h].lan is defined %}, {{ hostvars[h].lan }}{% endif %}
+
+{% endfor %}
+{% else %}
+
+[Peer]
+# hub
+PublicKey = {{ hostvars[groups['hub'][0]].pubkey }}
+Endpoint = {{ hostvars[groups['hub'][0]].ansible_host }}:51820
+AllowedIPs = 10.10.0.0/24{% for h in groups['sedes'] if h != inventory_hostname and hostvars[h].lan is defined %}, {{ hostvars[h].lan }}{% endfor %}
+
+PersistentKeepalive = 25
+{% endif %}

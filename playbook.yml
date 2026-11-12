@@ -1,0 +1,62 @@
+---
+- name: Base y llaves en todas las VMs
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Instalar paquetes
+      ansible.builtin.apt:
+        name: [wireguard, iperf3, nftables, prometheus-node-exporter]
+        update_cache: true
+        state: present
+    - name: Activar IP forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_set: true
+        state: present
+        reload: true
+    - name: Carpeta de WireGuard
+      ansible.builtin.file:
+        path: /etc/wireguard
+        state: directory
+        mode: "0700"
+    - name: Generar llaves si no existen
+      ansible.builtin.shell: umask 077; wg genkey | tee /etc/wireguard/wg0.key | wg pubkey > /etc/wireguard/wg0.pub
+      args:
+        creates: /etc/wireguard/wg0.pub
+    - name: Leer llave publica
+      ansible.builtin.slurp:
+        src: /etc/wireguard/wg0.pub
+      register: pub_raw
+    - name: Leer llave privada
+      ansible.builtin.slurp:
+        src: /etc/wireguard/wg0.key
+      register: key_raw
+      no_log: true
+    - name: Guardar llaves como variables
+      ansible.builtin.set_fact:
+        pubkey: "{{ pub_raw.content | b64decode | trim }}"
+        privkey: "{{ key_raw.content | b64decode | trim }}"
+      no_log: true
+
+- name: Configurar y levantar wg0
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Crear wg0.conf desde plantilla
+      ansible.builtin.template:
+        src: wg0.conf.j2
+        dest: /etc/wireguard/wg0.conf
+        mode: "0600"
+        backup: true
+    - name: Bajar wg0 si estaba levantado a mano
+      ansible.builtin.command: wg-quick down wg0
+      failed_when: false
+      changed_when: false
+    - name: Habilitar y reiniciar wg0
+      ansible.builtin.systemd:
+        name: wg-quick@wg0
+        enabled: true
+        state: restarted
